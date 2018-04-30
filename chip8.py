@@ -21,6 +21,26 @@ class Chip8:
 
         self.load_rom(rom)
 
+        # Font
+        self.ram[:80] = [
+            0xF0, 0x90, 0x90, 0x90, 0xF0, # 0
+            0x20, 0x60, 0x20, 0x20, 0x70, # 1
+            0xF0, 0x10, 0xF0, 0x80, 0xF0, # 2
+            0xF0, 0x10, 0xF0, 0x10, 0xF0, # 3
+            0x90, 0x90, 0xF0, 0x10, 0x10, # 4
+            0xF0, 0x80, 0xF0, 0x10, 0xF0, # 5
+            0xF0, 0x80, 0xF0, 0x90, 0xF0, # 6
+            0xF0, 0x10, 0x20, 0x40, 0x40, # 7
+            0xF0, 0x90, 0xF0, 0x90, 0xF0, # 8
+            0xF0, 0x90, 0xF0, 0x10, 0xF0, # 9
+            0xF0, 0x90, 0xF0, 0x90, 0x90, # A
+            0xE0, 0x90, 0xE0, 0x90, 0xE0, # B
+            0xF0, 0x80, 0x80, 0x80, 0xF0, # C
+            0xE0, 0x90, 0x90, 0x90, 0xE0, # D
+            0xF0, 0x80, 0xF0, 0x80, 0xF0, # E
+            0xF0, 0x80, 0xF0, 0x80, 0x80  # F
+        ]
+
         self.instructions = {
             0x1000: self.op_1NNN,
             0x2000: self.op_2NNN,
@@ -34,6 +54,7 @@ class Chip8:
             0xB000: self.op_BNNN,
             0xC000: self.op_CXNN,
             0xD000: self.op_DXYN,
+            0xF000: self.op_F000,
         }
 
     # Emulate overflow and underflow
@@ -52,7 +73,7 @@ class Chip8:
         for ptr in range(len(arr)):
             if ptr % 64 == 0:
                 s += '0x{:03X}: '.format(ptr)
-            s += self.hex_str(self.ram[ptr])
+            s += self.hex_str(arr[ptr])
             s += '\n' if ptr % 64 == 63 else ' '
         print(s)
 
@@ -64,6 +85,7 @@ class Chip8:
         opcode = self.ram[self.pc] << 8 | self.ram[self.pc + 1]
         print('0x{:04X}'.format(opcode))
 
+        # print(self.instructions[opcode & 0xF000])
         self.instructions[opcode & 0xF000](opcode) # Mask opcode, get associated function, and execute
         self.pc += 2 # Increment program counter to next instruction
 
@@ -122,6 +144,7 @@ class Chip8:
             self.pc += 2
 
     def op_6XNN(self, opcode):  # Set Vx to NN
+        # print('V:', (opcode & 0x0F00) >> 8, (opcode & 0x00FF))
         self.V[(opcode & 0x0F00) >> 8] = (opcode & 0x00FF)
 
     def op_7XNN(self, opcode):  # Increment Vx by NN
@@ -169,8 +192,37 @@ class Chip8:
             self.display[y * 64 + x0:y + 64 + x0 + 8] = row
             ptr += 1
 
+    # Determine which F*** opcode to execute by masking off FX**
+    def op_F000(self, opcode):
+        {0x29: self.op_FX29, 0x33: self.op_FX33, 0x55: self.op_FX55, 0x65: self.op_FX65}[opcode & 0x00FF](opcode)
+
+    def op_FX29(self, opcode):
+        Vx = self.V[(opcode & 0x0F00) >> 8]
+        if Vx > 0xF:
+            raise ValueError('0xFX29 with {} out of bounds'.format(Vx))
+        self.ram[self.I:self.I + 4] = self.ram[Vx * 4:(Vx + 1) * 4]
+
+    def op_FX33(self, opcode):  # Convert Vx to BCD, store in 3 bytes starting at I
+        Vx = self.V[(opcode & 0x0F00) >> 8]
+        self.ram[self.I + 0] = Vx // 100
+        self.ram[self.I + 1] = (Vx % 100) // 10
+        self.ram[self.I + 2] = Vx % 10
+
+    def op_FX55(self, opcode):  # Copy V0-Vx to ram, beginning at I
+        V_slice = self.V[:((opcode & 0x0F00) >> 8) + 1]
+        self.ram[self.I:self.I + len(V_slice)] = V_slice
+
+    def op_FX65(self, opcode):  # Copy x values from ram starting at I to V0-Vx
+        x = (opcode & 0x0F00) >> 8
+        ram_slice = self.ram[self.I:self.I + x + 1]
+        self.V[:x + 1] = ram_slice
 
 cpu = Chip8('pong.rom')
 cpu.print_mem(cpu.ram)
-while True:
-    cpu._cycle_clock()
+try:
+    while True:
+        cpu._cycle_clock()
+        cpu.print_mem(cpu.V)
+except:
+    cpu.print_mem(cpu.ram)
+    raise
